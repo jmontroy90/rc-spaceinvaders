@@ -66,7 +66,8 @@ func (b *game) addObject(obj object) {
 
 func (b *game) render() {
 	clearScreen()
-	fmt.Printf("\n" + padding() + "Press 'q' to quit.\r\n\n")
+
+	fmt.Printf(instructions())
 	for y := range b.conf.height {
 		fmt.Printf(padding())
 		for x := range b.conf.width {
@@ -82,6 +83,13 @@ func (b *game) render() {
 
 func padding() string {
 	return "          "
+}
+
+func instructions() string {
+	return fmt.Sprintf(
+		"\n" + padding() + "- Press 'q' to quit.\r\n" +
+			padding() + "- 'wasd' to move up/left/down/right.\r\n\n",
+	)
 }
 
 func (b *game) find(pos xy) (*object, bool) {
