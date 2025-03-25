@@ -19,16 +19,17 @@ func main() {
 	conf := newDefaultConfig()
 	g := newGame(conf)
 	// enemies
-	for i := 20; i < 30; i += 2 {
+	for i := conf.width / 3; i < (conf.width/3)*2; i += 2 {
 		g.addObject(newEnemy(xy{i, 2}))
 		g.addObject(newEnemy(xy{i + 1, 3}))
 		g.addObject(newEnemy(xy{i, 4}))
 	}
 	g.render() // initial render
 	renderCh := make(chan struct{})
+	inputCh := make(chan xy)
 	exitCh := make(chan struct{})
-	go g.mvmtLoop(renderCh, exitCh)
-	go g.userInputLoop(renderCh, exitCh)
+	go g.objectLoop(renderCh, inputCh, exitCh)
+	go g.inputLoop(inputCh, exitCh)
 	startControlLoop(g, renderCh, exitCh)
 
 }
@@ -39,7 +40,7 @@ func startControlLoop(g *game, renderCh, exitCh chan struct{}) {
 		case <-renderCh:
 			g.render()
 		case <-exitCh:
-			fmt.Printf("\r\n\nExiting...")
+			fmt.Printf("\r\n\n" + padding() + "Exiting...")
 			time.Sleep(500 * time.Millisecond)
 			return
 		}
@@ -69,4 +70,15 @@ func configureTerminal() (restore func(), err error) {
 func clearScreen() {
 	fmt.Print("\033[H")  // ANSI: move cursor to top left
 	fmt.Print("\033[3J") // ANSI: clear scrollback
+}
+
+func padding() string {
+	return "          "
+}
+
+func instructions() string {
+	return fmt.Sprintf(
+		"\n" + padding() + "- Press 'q' to quit.\r\n" +
+			padding() + "- 'wasd' to move up/left/down/right.\r\n\n",
+	)
 }
