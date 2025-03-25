@@ -10,6 +10,7 @@ const (
 	cursor = '\U0001F726'
 	//explosion = 'X'
 	explosion = '\U000026CC'
+	bullet    = '.'
 )
 
 type objectType int
@@ -105,6 +106,21 @@ func newExplosion(pos xy, createdAt time.Duration) object {
 		hasMvmt:    false,
 		hasExpiry:  true,
 		expiry:     expiry{expiresAfter: 500 * time.Millisecond, createdAt: createdAt},
+	}
+}
+
+func newBullet(pos xy, clock time.Duration) object {
+	return object{
+		name:       "bullet",
+		repr:       bullet,
+		pos:        pos,
+		objectType: computer,
+		hasMvmt:    true,
+		mvmt: movement{
+			steps:     []xy{{0, -1}},
+			freq:      50 * time.Millisecond,
+			lastMoved: clock,
+		},
 	}
 }
 

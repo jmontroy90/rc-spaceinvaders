@@ -26,7 +26,7 @@ func main() {
 	}
 	g.render() // initial render
 	renderCh := make(chan struct{})
-	inputCh := make(chan xy)
+	inputCh := make(chan rune)
 	exitCh := make(chan struct{})
 	go g.objectLoop(renderCh, inputCh, exitCh)
 	go g.inputLoop(inputCh, exitCh)

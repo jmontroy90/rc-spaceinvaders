@@ -22,20 +22,23 @@ type game struct {
 	clock     time.Duration
 	conf      config
 	gameOver  bool
+	score     int
 }
 
 type config struct {
-	width, height int
-	frameRate     time.Duration
-	cursorPos     xy
+	width, height   int
+	frameRate       time.Duration
+	cursorPos       xy
+	startNumEnemies int
 }
 
 func newDefaultConfig() config {
 	return config{
-		width:     defaultWidth,
-		height:    defaultHeight,
-		frameRate: defaultFrameRate,
-		cursorPos: xy{defaultWidth / 2, defaultHeight - 3},
+		width:           defaultWidth,
+		height:          defaultHeight,
+		frameRate:       defaultFrameRate,
+		cursorPos:       xy{defaultWidth / 2, defaultHeight - 3},
+		startNumEnemies: 15,
 	}
 }
 
@@ -59,13 +62,13 @@ func newGame(conf config) *game {
 	return &b
 }
 
-func (b *game) render() {
+func (g *game) render() {
 	clearScreen()
 	fmt.Printf(instructions())
-	for y := range b.conf.height {
+	for y := range g.conf.height {
 		fmt.Printf(padding())
-		for x := range b.conf.width {
-			if obj, ok := b.find(xy{x, y}); ok {
+		for x := range g.conf.width {
+			if obj, ok := g.find(xy{x, y}); ok {
 				fmt.Printf("%c", obj.repr)
 			} else {
 				fmt.Printf(" ")
@@ -75,38 +78,55 @@ func (b *game) render() {
 	}
 }
 
-func (b *game) objectLoop(renderCh chan<- struct{}, inputCh <-chan xy, exitCh chan struct{}) {
+func (g *game) objectLoop(renderCh chan<- struct{}, inputCh <-chan rune, exitCh chan struct{}) {
 	for {
 		select {
 		case <-exitCh:
 			return
-		case step := <-inputCh:
-			c, ok := b.objs[b.cursorPos]
+		case input := <-inputCh:
+			c, ok := g.objs[g.cursorPos]
 			if !ok {
 				log.Fatalf("Couldn't find cursor!")
 			}
-			// TODO: this will be picked up later; is this silly?
-			c.cursorMvmt = &step
-			b.addObject(c)
+			switch input {
+			case 'q', 'Q':
+				close(exitCh) // broadcasts to all listeners
+				return
+			case 'w', 'W':
+				c.cursorMvmt = &xy{0, -1}
+				g.addObject(c)
+			case 'a', 'A':
+				c.cursorMvmt = &xy{-1, 0}
+				g.addObject(c)
+			case 's', 'S':
+				c.cursorMvmt = &xy{0, 1}
+				g.addObject(c)
+			case 'd', 'D':
+				c.cursorMvmt = &xy{1, 0}
+				g.addObject(c)
+			case ' ':
+				g.addObject(newBullet(addPos(g.cursorPos, xy{0, -1}), g.clock))
+			}
 		default:
-			if b.gameOver {
+			if g.gameOver {
 				renderCh <- struct{}{}
 				fmt.Printf("\r\n\n" + padding() + "Game over!")
+				fmt.Printf("\r\n\n"+padding()+"Score: %v", g.score)
 				time.Sleep(1 * time.Second)
 				close(exitCh)
 				return
 			}
 			// TODO: your frame rate calculation would have to factor in how long this part below takes.
-			if shouldRender := b.handleObjects(); shouldRender {
+			if shouldRender := g.handleObjects(); shouldRender {
 				renderCh <- struct{}{}
 			}
-			time.Sleep(b.conf.frameRate)
-			b.clock += b.conf.frameRate
+			time.Sleep(g.conf.frameRate)
+			g.clock += g.conf.frameRate
 		}
 	}
 }
 
-func (b *game) inputLoop(inputCh chan<- xy, exitCh chan struct{}) {
+func (g *game) inputLoop(inputCh chan<- rune, exitCh chan struct{}) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		select {
@@ -117,103 +137,94 @@ func (b *game) inputLoop(inputCh chan<- xy, exitCh chan struct{}) {
 			if err != nil {
 				log.Fatalf("Error reading input: %v", err)
 			}
-			var delta *xy
-			switch input {
-			case 'q', 'Q':
-				close(exitCh) // broadcasts to all listeners
-				return
-			case 'w', 'W':
-				delta = &xy{0, -1}
-			case 'a', 'A':
-				delta = &xy{-1, 0}
-			case 's', 'S':
-				delta = &xy{0, 1}
-			case 'd', 'D':
-				delta = &xy{1, 0}
-			}
-			if delta != nil {
-				inputCh <- *delta
-			}
+			inputCh <- input
 		}
 	}
 }
 
-func (b *game) handleObjects() bool {
+func (g *game) handleObjects() bool {
 	var shouldRender bool
-	for _, orig := range b.objs {
-		if updated := b.handleObject(orig); updated {
+	for _, orig := range g.objs {
+		if updated := g.handleObject(orig); updated {
 			shouldRender = true
 		}
 	}
 	return shouldRender
 }
 
-func (b *game) handleObject(orig object) (render bool) {
+func (g *game) handleObject(orig object) (render bool) {
 	switch {
-	case orig.hasMvmt && orig.isSteppable(b.clock):
+	case orig.hasMvmt && orig.isSteppable(g.clock):
 		updated := orig.stepObject()
-		if found, ok := b.objs[updated.pos]; ok {
-			b.handleInteraction(orig, found)
+		if found, ok := g.objs[updated.pos]; ok {
+			g.handleInteraction(orig, found)
 		} else {
-			b.removeAt(orig.pos)
-			b.addObject(updated)
+			g.removeAt(orig.pos)
+			g.addObject(updated)
 		}
 		render = true
-	case orig.hasExpiry && orig.isExpired(b.clock):
-		b.removeAt(orig.pos) // at this point in the loop it's time for the explosion to go away
+	case orig.hasExpiry && orig.isExpired(g.clock):
+		g.removeAt(orig.pos) // at this point in the loop it's time for the explosion to go away
 		render = true
 	case orig.isCursor && orig.cursorMvmt != nil:
 		step := *orig.cursorMvmt
-		newPos := addPos(b.cursorPos, step)
-		if found, ok := b.objs[newPos]; ok {
-			b.handleInteraction(orig, found)
+		newPos := addPos(g.cursorPos, step)
+		if found, ok := g.objs[newPos]; ok {
+			g.handleInteraction(orig, found)
 		} else {
-			b.removeAt(b.cursorPos)
+			g.removeAt(g.cursorPos)
 			orig.pos = newPos
-			b.cursorPos = newPos
+			g.cursorPos = newPos
 			orig.cursorMvmt = nil
-			b.addObject(orig)
+			g.addObject(orig)
 		}
 		render = true
 	}
 	return render
 }
 
-func (b *game) handleInteraction(orig, found object) {
+func (g *game) handleInteraction(orig, found object) {
 	// TODO: this feels smelly, the object abstraction is leaky
 	switch {
 	case orig.objectType == player && found.objectType == computer:
 		fallthrough
 	case orig.objectType == computer && found.objectType == player:
-		b.removeAt(orig.pos)
-		b.removeAt(found.pos)
-		b.addObject(newExplosion(found.pos, b.clock))
-		b.gameOver = true
+		g.removeAt(orig.pos)
+		g.removeAt(found.pos)
+		g.addObject(newExplosion(found.pos, g.clock))
+		g.gameOver = true
 	// Note we don't need to invert this case currently, because env objects never move (just walls)!
 	case orig.objectType == player && found.objectType == env:
-		b.removeAt(orig.pos)
-		b.addObject(newExplosion(orig.pos, b.clock))
-		b.gameOver = true
+		g.removeAt(orig.pos)
+		g.addObject(newExplosion(orig.pos, g.clock))
+		g.gameOver = true
+	case orig.name == "enemy" && found.name == "bullet":
+		fallthrough
+	case orig.name == "bullet" && found.name == "enemy":
+		g.removeAt(orig.pos)
+		g.removeAt(found.pos)
+		g.addObject(newExplosion(found.pos, g.clock))
+		g.score++
 	}
 }
 
-func (b *game) find(pos xy) (*object, bool) {
-	b.objMu.RLock()
-	defer b.objMu.RUnlock()
-	if obj, ok := b.objs[pos]; ok {
+func (g *game) find(pos xy) (*object, bool) {
+	g.objMu.RLock()
+	defer g.objMu.RUnlock()
+	if obj, ok := g.objs[pos]; ok {
 		return &obj, true
 	}
 	return nil, false
 }
 
-func (b *game) removeAt(pos xy) {
-	b.objMu.Lock()
-	defer b.objMu.Unlock()
-	delete(b.objs, pos)
+func (g *game) removeAt(pos xy) {
+	g.objMu.Lock()
+	defer g.objMu.Unlock()
+	delete(g.objs, pos)
 }
 
-func (b *game) addObject(obj object) {
-	b.objMu.Lock()
-	defer b.objMu.Unlock()
-	b.objs[obj.pos] = obj
+func (g *game) addObject(obj object) {
+	g.objMu.Lock()
+	defer g.objMu.Unlock()
+	g.objs[obj.pos] = obj
 }
