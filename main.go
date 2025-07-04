@@ -55,7 +55,7 @@ func configureTerminal() (restore func(), err error) {
 	}
 	fmt.Print("\033[?25l") // ANSI: makes cursor disappear
 	fmt.Print("\033[2J")   // ANSI: clear visible screen
-	fmt.Print("\033[3J")   // ANSI: clear visible screen
+	fmt.Print("\033[3J")   // ANSI: clear scrollback
 	// closure to enable restoring original terminal state
 	return func() {
 		_ = term.Restore(fd, old)
